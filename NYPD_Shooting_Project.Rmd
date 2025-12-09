@@ -1,0 +1,321 @@
+---
+title: "NYPD Shooting Project"
+author: "DAndre Tafoya"
+date: "12-9-2025"
+output:
+  pdf_document: default
+  html_document: default
+---
+# Project Overview
+This document presents a reproducible analysis of the NYPD Shooting Incident Data
+(Historic).
+
+All analysis steps, from data import through visualization and interpretation,
+are contained in this R Markdown document. The raw data are read directly from
+CSV files using relative paths so that peers can download the GitHub repository
+and knit this document without modification.
+
+# Reproducibility and Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+```{r setup2}
+# Libraries used in this project
+library(readr)
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+
+```
+
+# Data Import
+
+```{r import-data}
+shootings_raw <- read_csv(
+  "data/NYPD_Shooting_Incident_Data__Historic_.csv",
+  show_col_types = FALSE
+)
+
+dim(shootings_raw)
+head(shootings_raw)
+```
+
+# Data Cleaning and Tidying
+
+```{r drop-and-rename}
+shootings_step1 <- shootings_raw %>%
+  # Remove columns with excessive missingness
+  select(-LOC_OF_OCCUR_DESC, -LOC_CLASSFCTN_DESC) %>%
+  
+  # Rename variables to be clean, simple, and consistent
+  rename(
+    incident_id   = INCIDENT_KEY,
+    date          = OCCUR_DATE,
+    time          = OCCUR_TIME,
+    borough       = BORO,
+    precinct      = PRECINCT,
+    jurisdiction  = JURISDICTION_CODE,
+
+    victim_age    = VIC_AGE_GROUP,
+    victim_sex    = VIC_SEX,
+    victim_race   = VIC_RACE,
+
+    suspect_age   = PERP_AGE_GROUP,
+    suspect_sex   = PERP_SEX,
+    suspect_race  = PERP_RACE,
+
+    murder_flag   = STATISTICAL_MURDER_FLAG,
+    location_desc = LOCATION_DESC,
+
+    x_coord       = X_COORD_CD,
+    y_coord       = Y_COORD_CD,
+    latitude      = Latitude,
+    longitude     = Longitude
+  )
+
+# Inspect result
+glimpse(shootings_step1)
+```
+```{r type-conversions}
+shootings_step2 <- shootings_step1 %>%
+  mutate(
+    # Convert date and time
+    date = mdy(date),
+    time = hm(time),
+
+    # Convert categorical variables to factors
+    borough     = factor(borough),
+    precinct    = factor(precinct),
+    jurisdiction = factor(jurisdiction),
+
+    victim_age  = factor(victim_age),
+    victim_sex  = factor(victim_sex),
+    victim_race = factor(victim_race),
+
+    suspect_age  = factor(suspect_age),
+    suspect_sex  = factor(suspect_sex),
+    suspect_race = factor(suspect_race),
+
+    # Convert murder flag to factor for clarity
+    murder_flag = factor(
+      murder_flag,
+      levels = c(FALSE, TRUE),
+      labels = c("No", "Yes")
+    ),
+
+    # Ensure coordinates are numeric
+    x_coord   = as.numeric(x_coord),
+    y_coord   = as.numeric(y_coord),
+    latitude  = as.numeric(latitude),
+    longitude = as.numeric(longitude)
+  )
+
+glimpse(shootings_step2)
+```
+I want to focus my analysis on shootings from 2010 to 2024.
+
+```{r filter-2010s}
+shootings_2010s <- shootings_step2 %>%
+  filter(date >= as.Date("2010-01-01"))
+
+range(shootings_2010s$date, na.rm = TRUE)
+```
+```{r missingness-2010s}
+library(tidyr)
+
+missing_2010s <- shootings_2010s %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "n_missing"
+  ) %>%
+  arrange(desc(n_missing))
+
+missing_2010s
+```
+
+# Exploratory Data Analysis and Visualizations
+
+```{r concise-dataset}
+#Create year 
+shootings_w_year <- shootings_2010s %>%
+  mutate(year = year(date))
+
+range(shootings_w_year$year, na.rm = TRUE)
+
+analysis_dataset <- shootings_w_year %>%
+  select(
+    year,
+    borough,
+    murder_flag
+  )
+
+glimpse(analysis_dataset)
+```
+We will begin the exploratory analysis by examining the total number of shooting incidents in New York has changed from 2010 to 2024. This will help us understand overall trends before taking a closer look at fatal versus non fatal shootings and differences across boroughs.
+
+```{r yearly-counts}
+yearly_counts <- analysis_dataset %>%
+  count(year)
+yearly_counts
+```
+```{r plot-total-shootings}
+ggplot(yearly_counts, aes(x = year, y = n)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  labs(
+    title = "Total NYPD Shooting Incidents per Year (2010–2024)",
+    x = "Year",
+    y = "Number of Shooting Incidents"
+  ) +
+  theme_bw()
+```
+
+We can see that in the years 2010 and 2020 the number of shooting incidents is alarmingly high. This could be related to economic disruption. The high count in 2010 could possibly reflect lingering social and economic effects of the Great Recession. The surge in 2020 aligns with the COVID-19 recession. Although economic indicators are not included in this analysis both periods suggest that economic and social disruptions during these periods may coincide with an increase in violent crime. 
+
+Next, we will examine how fatal and nonfatal shootings have changed over time. 
+
+```{r yearly-fatal-nonfatal}
+yearly_fatal_counts <- analysis_dataset %>%
+  count(year, murder_flag)
+
+yearly_fatal_counts
+```
+```{r plot-fatal-nonfatal}
+library(ggplot2)
+
+ggplot(yearly_fatal_counts,
+       aes(x = year, y = n, color = murder_flag)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  labs(
+    title = "Fatal vs Non-Fatal NYPD Shooting Incidents per Year (2010–2024)",
+    x = "Year",
+    y = "Number of Shooting Incidents",
+    color = "Fatal Shooting"
+  ) +
+  theme_classic()
+```
+
+This chart shows us that fatal and non-fatal shootings follow similar trends over time. This is expected because we can safely assume that as the number of shooting incidents increase the number of both fatal and non-fatal shootings also increase. The purpose of this chart is to assess whether shootings are becoming more deadly over time.
+
+Before fitting a model, we should examine how shooting incidents have changed over time
+across New York City boroughs. We would like to see if trends are consistent across boroughs or driven by changes in specific areas. 
+
+```{r yearly-borough-counts}
+borough_yearly_counts <- analysis_dataset %>%
+  count(year, borough)
+
+borough_yearly_counts
+```
+
+```{r plot-borough-over-time}
+library(ggplot2)
+
+ggplot(borough_yearly_counts,
+       aes(x = year, y = n)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  facet_wrap(~ borough, scales = "free_y") +
+  labs(
+    title = "NYPD Shooting Incidents by Borough Over Time (2010–2024)",
+    x = "Year",
+    y = "Number of Shooting Incidents"
+  ) +
+  theme_classic()
+```
+
+It's apparent that trends across boroughs are very similar indicating that temporal factors plays a larger role than location in shaping shooting patterns. This consistency could also further support the idea that economic and social disruptions affecting the city as a whole may leads to an increase in the number of shootings. 
+
+# Modeling
+
+We have observed differences in shooting patterns over time and across boroughs. For further examination of these patterns, we will fit a logistic regression model to estimate the probability that a shooting results in a fatality of as a function of year and borough. 
+
+### Model specification
+
+- **Outcome:** `murder_flag`  
+- **Predictors:** `year`, `borough`  
+- **Family:** binomial (logistic regression)
+
+```{r logistic-model}
+fatal_model <- glm(
+  murder_flag ~ year + borough,
+  data = analysis_dataset,
+  family = binomial
+)
+
+summary(fatal_model)
+```
+
+**Summary Analysis**
+- The model is a logistic regression predicting the probability that a shooting results in a fatality (`murder_flag`) using year and borough as predictors.
+
+- The estimated coefficient for year is positive and statistically significant (p = 0.0236), This means that, holding borough constant, the odds of a shooting being fatal increase slightly each year (about 0.9% higher odds per year, since exp(0.0086) approximately equal to 1.009).
+
+- Manhattan has a statistically significant negative coefficient (p = 0.0274), suggesting lower odds of fatal outcomes compared to the reference borough.
+
+- Coefficients for Brooklyn, Queens, and Staten Island are not statistically significant, indicating no detectable differences in fatality odds relative to the reference category for these boroughs.
+
+- The intercept is statistically significant and reflects the baseline log-odds of a fatal shooting for the reference borough at year zero.
+
+- The reduction from null deviance (21,565) to residual deviance (21,552) indicates that the model explains some variance in fatal outcomes, though the overall improvement is modest.
+
+- The AIC value (21,564) reflects model fit and can be used for comparison with alternative specifications.
+
+- The model converged successfully in four Fisher scoring iterations, indicating stable estimation.
+
+
+```{r summary-overall-fatality}
+analysis_dataset %>%
+  count(murder_flag) %>%
+  mutate(
+    proportion = n / sum(n)
+  )
+```
+```{r summary-by-borough}
+analysis_dataset %>%
+  group_by(borough) %>%
+  summarise(
+    total_incidents = n(),
+    fatal_incidents = sum(murder_flag == "Yes"),
+    fatal_rate = mean(murder_flag == "Yes")
+  ) %>%
+  arrange(desc(fatal_rate))
+```
+```{r summary-by-year}
+analysis_dataset %>%
+  group_by(year) %>%
+  summarise(
+    total_incidents = n(),
+    fatal_incidents = sum(murder_flag == "Yes"),
+    fatal_rate = mean(murder_flag == "Yes")
+  )
+```
+
+- **Overall fatality rate (2010–2024):**
+  - Approximately 19% of shooting incidents are fatal, while about 81% are non-fatal.
+  - Fatal shootings represent a substantial but smaller share of incidents.
+  - The relative stability of fatality proportions over time suggests that changes in gun violence are driven more by incident frequency than by increased lethality.
+
+- **Borough-level fatality patterns:**
+  - Fatality rates vary only modestly across boroughs, ranging from roughly 18% to just over 20%.
+  - Despite large differences in total shooting counts, geographic variation in lethality is limited.
+  - This aligns with the regression results, where only Manhattan shows a statistically significant difference and other borough effects are small.
+
+- **Temporal trends in fatality rates:**
+  - Fatality rates decline slightly through the mid-2010s and increase again in the late 2010s and early 2020s.
+  - These changes are modest in size but persist over time.
+  - The pattern helps explain the statistically significant positive effect of year in the logistic regression model.
+
+# Limitations and Pitfalls
+
+The logistic regression model is purely descriptive. The observed associations between year, borough, and the likelihood that a shooting was fatal does not imply causal relationships. There are many unobserved factors that our model does not capture which introduces omitted variable bias. Some examples of these unobserved factors could be emergency response time, incident context, and perhaps weapon type. We must also note that there are likely many shootings that were not reported to law enforcement due to the public's willingness to report a crime. 
+
+
